@@ -1,0 +1,28 @@
+{
+  "name": "dcbot",
+  "version": "1.0.0",
+  "description": "Discord bot with slash commands",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "start": "bun run index.ts",
+    "dev": "bun run --watch index.ts"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "discord.js",
+    "typescript",
+    "bun"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "14.25.1",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  }
+}
