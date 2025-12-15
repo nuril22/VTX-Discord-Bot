@@ -81,7 +81,7 @@
 ### 1. Clone repository
 
 ```bash
-git clone https://github.com/yourusername/dcbot.git
+git clone https://github.com/nuril22/VTX-Discord-Bot.git
 cd dcbot
 ```
 
@@ -423,7 +423,7 @@ Project ini dilisensikan di bawah MIT License.
 
 Jika Anda menemukan masalah atau memiliki pertanyaan:
 
-1. Cek halaman [Issues](https://github.com/yourusername/dcbot/issues)
+1. Cek halaman [Issues](https://github.com/nuril22/VTX-Discord-Bot/issues)
 2. Buat issue baru dengan informasi detail
 3. Sertakan pesan error dan langkah untuk mereproduksi
 
