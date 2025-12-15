@@ -54,6 +54,17 @@
   - Manajemen pengaturan dengan tombol interaktif
 - Pembersihan warning otomatis saat user keluar/di-ban
 
+### 🎁 Sistem Giveaway
+- **Buat Giveaway** - Membuat giveaway dengan durasi, jumlah pemenang, dan opsi role requirement
+- **Button Interaktif** - Peserta dapat join/leave giveaway dengan tombol
+- **Auto-End** - Giveaway otomatis berakhir saat waktu habis (check setiap 10 detik)
+- **Mention Creator** - Bot otomatis mention creator saat giveaway berakhir
+- **DM Pemenang** - Bot mengirim DM ke semua pemenang
+- **Reroll** - Acak ulang pemenang jika diperlukan (hanya dalam 1 hari)
+- **Auto-Cleanup** - Data giveaway otomatis dihapus setelah 1 hari sejak berakhir
+- **Persistent Storage** - Data tersimpan di database, tetap berjalan meski bot restart
+- **Discord Timestamp** - Menggunakan timestamp Discord untuk timer yang akurat
+
 ### 🎯 Command Utility
 - **Bot Info** - Statistik bot detail (CPU, memory, disk, uptime)
 - **User Info** - Tampilan informasi user lengkap
@@ -262,6 +273,26 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&
 | `/sell` | Jual item | `/sell item:iron quantity:5` |
 | `/rebirth` | Rebirth untuk mendapatkan bonus | `/rebirth` |
 
+### 🎁 Giveaway
+
+| Command | Deskripsi | Penggunaan |
+|---------|-----------|------------|
+| `/gcreate` | Buat giveaway baru | `/gcreate time:1d2h30m winner:1 [role:@role] [request:text] [channel:#channel]` |
+| `/gend` | Akhiri giveaway dan pilih pemenang | `/gend id:giveaway_id` |
+| `/greroll` | Acak ulang pemenang giveaway | `/greroll id:giveaway_id` |
+| `/glist` | Lihat daftar peserta giveaway | `/glist id:giveaway_id` |
+
+**Format Waktu untuk Giveaway:**
+- `y` = tahun, `d` = hari, `h` = jam, `m` = menit, `s` = detik
+- Contoh: `1d2h30m` = 1 hari, 2 jam, 30 menit
+- Minimal durasi: 1 menit
+
+**Catatan:**
+- Hanya moderator yang dapat menggunakan command giveaway
+- Giveaway otomatis berakhir saat waktu habis
+- Data giveaway otomatis dihapus setelah 1 hari sejak berakhir
+- Reroll hanya bisa dilakukan dalam 1 hari setelah giveaway berakhir
+
 ### 🛠️ Utility
 
 | Command | Deskripsi | Penggunaan |
@@ -312,6 +343,11 @@ dcbot/
 │   │   ├── rpg-profile.ts
 │   │   ├── sell.ts
 │   │   └── store.ts
+│   ├── giveaway/        # Command sistem giveaway
+│   │   ├── gcreate.ts
+│   │   ├── gend.ts
+│   │   ├── greroll.ts
+│   │   └── glist.ts
 │   └── utility/          # Command utility
 │       ├── botinfo.ts
 │       ├── help.ts
@@ -345,6 +381,7 @@ Bot menggunakan database SQLite:
 
 - **`db/globals.db`** - Data global bot
   - Warnings, pengaturan warning per server
+  - Giveaways (data giveaway, peserta, pemenang)
 
 Database otomatis dibuat saat pertama kali dijalankan.
 
