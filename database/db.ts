@@ -140,6 +140,9 @@ export async function initDatabase(): Promise<void> {
             )
         `);
 
+        // Initialize giveaway tables
+        await initGiveawayTables();
+
         console.log('[DB] Globals database tables initialized');
     } catch (error) {
         console.error('[DB] Error initializing database:', error);
@@ -620,6 +623,282 @@ export function updateWarnSettings(guildId: string, maxWarnings?: number, autoBa
     } catch (error) {
         console.error('[DB] Error updating warn settings:', error);
         throw error;
+    }
+}
+
+// ========== GIVEAWAY SYSTEM (using globals.db) ==========
+
+// Initialize giveaway tables
+export async function initGiveawayTables(): Promise<void> {
+    try {
+        // Giveaways table
+        globalsDb.exec(`
+            CREATE TABLE IF NOT EXISTS giveaways (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                creator_id TEXT NOT NULL,
+                title TEXT,
+                description TEXT,
+                end_time INTEGER NOT NULL,
+                winner_count INTEGER NOT NULL,
+                role_requirement TEXT,
+                request TEXT,
+                participants TEXT DEFAULT '[]',
+                winners TEXT DEFAULT '[]',
+                ended INTEGER DEFAULT 0,
+                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+            )
+        `);
+
+        console.log('[DB] Giveaway tables initialized');
+    } catch (error) {
+        console.error('[DB] Error initializing giveaway tables:', error);
+        throw error;
+    }
+}
+
+// Create giveaway
+export function createGiveaway(
+    id: string,
+    guildId: string,
+    channelId: string,
+    messageId: string,
+    creatorId: string,
+    title: string,
+    description: string,
+    endTime: number,
+    winnerCount: number,
+    roleRequirement?: string,
+    request?: string
+): void {
+    try {
+        const stmt = globalsDb.prepare(`
+            INSERT INTO giveaways (
+                id, guild_id, channel_id, message_id, creator_id, 
+                title, description, end_time, winner_count, 
+                role_requirement, request, participants, winners, ended
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', 0)
+        `);
+        stmt.run(
+            id, guildId, channelId, messageId, creatorId,
+            title, description, endTime, winnerCount,
+            roleRequirement || null, request || null
+        );
+    } catch (error) {
+        console.error('[DB] Error creating giveaway:', error);
+        throw error;
+    }
+}
+
+// Get giveaway
+export function getGiveaway(id: string): {
+    id: string;
+    guild_id: string;
+    channel_id: string;
+    message_id: string;
+    creator_id: string;
+    title: string;
+    description: string;
+    end_time: number;
+    winner_count: number;
+    role_requirement: string | null;
+    request: string | null;
+    participants: string;
+    winners: string;
+    ended: number;
+    created_at: number;
+} | null {
+    try {
+        const stmt = globalsDb.prepare('SELECT * FROM giveaways WHERE id = ?');
+        const row = stmt.get(id) as any;
+        return row || null;
+    } catch (error) {
+        console.error('[DB] Error getting giveaway:', error);
+        return null;
+    }
+}
+
+// Get all active giveaways
+export function getActiveGiveaways(): Array<{
+    id: string;
+    guild_id: string;
+    channel_id: string;
+    message_id: string;
+    creator_id: string;
+    title: string;
+    description: string;
+    end_time: number;
+    winner_count: number;
+    role_requirement: string | null;
+    request: string | null;
+    participants: string;
+    winners: string;
+    ended: number;
+    created_at: number;
+}> {
+    try {
+        const stmt = globalsDb.prepare('SELECT * FROM giveaways WHERE ended = 0');
+        const rows = stmt.all() as any[];
+        return rows || [];
+    } catch (error) {
+        console.error('[DB] Error getting active giveaways:', error);
+        return [];
+    }
+}
+
+// Get expired giveaways
+export function getExpiredGiveaways(): Array<{
+    id: string;
+    guild_id: string;
+    channel_id: string;
+    message_id: string;
+    creator_id: string;
+    title: string;
+    description: string;
+    end_time: number;
+    winner_count: number;
+    role_requirement: string | null;
+    request: string | null;
+    participants: string;
+    winners: string;
+    ended: number;
+    created_at: number;
+}> {
+    try {
+        const currentTime = Math.floor(Date.now() / 1000);
+        const stmt = globalsDb.prepare('SELECT * FROM giveaways WHERE ended = 0 AND end_time <= ?');
+        const rows = stmt.all(currentTime) as any[];
+        return rows || [];
+    } catch (error) {
+        console.error('[DB] Error getting expired giveaways:', error);
+        return [];
+    }
+}
+
+// Add participant to giveaway
+export function addGiveawayParticipant(id: string, userId: string): boolean {
+    try {
+        const giveaway = getGiveaway(id);
+        if (!giveaway || giveaway.ended === 1) return false;
+
+        const participants = JSON.parse(giveaway.participants || '[]') as string[];
+        if (participants.includes(userId)) return false; // Already participating
+
+        participants.push(userId);
+        const stmt = globalsDb.prepare('UPDATE giveaways SET participants = ? WHERE id = ?');
+        stmt.run(JSON.stringify(participants), id);
+        return true;
+    } catch (error) {
+        console.error('[DB] Error adding giveaway participant:', error);
+        return false;
+    }
+}
+
+// Remove participant from giveaway
+export function removeGiveawayParticipant(id: string, userId: string): boolean {
+    try {
+        const giveaway = getGiveaway(id);
+        if (!giveaway || giveaway.ended === 1) return false;
+
+        const participants = JSON.parse(giveaway.participants || '[]') as string[];
+        const index = participants.indexOf(userId);
+        if (index === -1) return false; // Not participating
+
+        participants.splice(index, 1);
+        const stmt = globalsDb.prepare('UPDATE giveaways SET participants = ? WHERE id = ?');
+        stmt.run(JSON.stringify(participants), id);
+        return true;
+    } catch (error) {
+        console.error('[DB] Error removing giveaway participant:', error);
+        return false;
+    }
+}
+
+// Get giveaway participants
+export function getGiveawayParticipants(id: string): string[] {
+    try {
+        const giveaway = getGiveaway(id);
+        if (!giveaway) return [];
+        return JSON.parse(giveaway.participants || '[]') as string[];
+    } catch (error) {
+        console.error('[DB] Error getting giveaway participants:', error);
+        return [];
+    }
+}
+
+// End giveaway and set winners
+export function endGiveaway(id: string, winners: string[]): void {
+    try {
+        const stmt = globalsDb.prepare('UPDATE giveaways SET ended = 1, winners = ? WHERE id = ?');
+        stmt.run(JSON.stringify(winners), id);
+    } catch (error) {
+        console.error('[DB] Error ending giveaway:', error);
+        throw error;
+    }
+}
+
+// Delete giveaway
+export function deleteGiveaway(id: string): boolean {
+    try {
+        const stmt = globalsDb.prepare('DELETE FROM giveaways WHERE id = ?');
+        const result = stmt.run(id);
+        return result.changes > 0;
+    } catch (error) {
+        console.error('[DB] Error deleting giveaway:', error);
+        return false;
+    }
+}
+
+// Get giveaways that ended more than 1 day ago (for cleanup)
+export function getOldEndedGiveaways(): Array<{
+    id: string;
+    guild_id: string;
+    channel_id: string;
+    message_id: string;
+    creator_id: string;
+    title: string;
+    description: string;
+    end_time: number;
+    winner_count: number;
+    role_requirement: string | null;
+    request: string | null;
+    participants: string;
+    winners: string;
+    ended: number;
+    created_at: number;
+}> {
+    try {
+        const currentTime = Math.floor(Date.now() / 1000);
+        const oneDayInSeconds = 24 * 60 * 60; // 1 day
+        const oneDayAgo = currentTime - oneDayInSeconds;
+        
+        // Get giveaways that ended more than 1 day ago
+        const stmt = globalsDb.prepare('SELECT * FROM giveaways WHERE ended = 1 AND end_time <= ?');
+        const rows = stmt.all(oneDayAgo) as any[];
+        return rows || [];
+    } catch (error) {
+        console.error('[DB] Error getting old ended giveaways:', error);
+        return [];
+    }
+}
+
+// Check if giveaway can be rerolled (must be ended and less than 1 day old)
+export function canRerollGiveaway(id: string): boolean {
+    try {
+        const giveaway = getGiveaway(id);
+        if (!giveaway || giveaway.ended === 0) return false;
+        
+        const currentTime = Math.floor(Date.now() / 1000);
+        const oneDayInSeconds = 24 * 60 * 60; // 1 day
+        const oneDayAgo = currentTime - oneDayInSeconds;
+        
+        // Can reroll if ended less than 1 day ago
+        return giveaway.end_time > oneDayAgo;
+    } catch (error) {
+        console.error('[DB] Error checking if giveaway can be rerolled:', error);
+        return false;
     }
 }
 

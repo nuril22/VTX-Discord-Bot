@@ -53,6 +53,7 @@ const categoryDescriptions: { [key: string]: string } = {
     'gambling': 'Commands permainan judi',
     'rpg': 'Commands sistem RPG dan mining',
     'moderator': 'Commands untuk moderasi server',
+    'giveaway': 'Commands untuk giveaway',
     'other': 'Commands lainnya'
 };
 

@@ -424,6 +424,76 @@ client.on(Events.InteractionCreate, async interaction => {
         return;
     }
 
+    // Handle button interactions
+    if (interaction.isButton()) {
+        // Handle giveaway join button
+        if (interaction.customId.startsWith('giveaway_join_')) {
+            const giveawayId = interaction.customId.replace('giveaway_join_', '');
+            const { getGiveaway, addGiveawayParticipant, removeGiveawayParticipant, getGiveawayParticipants } = await import('./database/db.js');
+            
+            const giveaway = getGiveaway(giveawayId);
+            if (!giveaway) {
+                await interaction.reply({ 
+                    content: '❌ Giveaway tidak ditemukan!', 
+                    flags: 64 // Ephemeral
+                });
+                return;
+            }
+
+            // Check if giveaway has ended
+            if (giveaway.ended === 1) {
+                await interaction.reply({ 
+                    content: '❌ Giveaway ini sudah berakhir!', 
+                    flags: 64 // Ephemeral
+                });
+                return;
+            }
+
+            // Check if giveaway is expired
+            const currentTime = Math.floor(Date.now() / 1000);
+            if (giveaway.end_time <= currentTime) {
+                await interaction.reply({ 
+                    content: '❌ Giveaway ini sudah berakhir!', 
+                    flags: 64 // Ephemeral
+                });
+                return;
+            }
+
+            // Check role requirement
+            if (giveaway.role_requirement) {
+                const member = await interaction.guild?.members.fetch(interaction.user.id).catch(() => null);
+                if (!member || !member.roles.cache.has(giveaway.role_requirement)) {
+                    await interaction.reply({ 
+                        content: `❌ Anda harus memiliki role <@&${giveaway.role_requirement}> untuk ikut giveaway ini!`, 
+                        flags: 64 // Ephemeral
+                    });
+                    return;
+                }
+            }
+
+            // Toggle participation (join if not participating, leave if already participating)
+            const participants = getGiveawayParticipants(giveawayId);
+            const isParticipating = participants.includes(interaction.user.id);
+
+            if (isParticipating) {
+                // Leave giveaway
+                removeGiveawayParticipant(giveawayId, interaction.user.id);
+                await interaction.reply({ 
+                    content: '✅ Anda telah keluar dari giveaway!', 
+                    flags: 64 // Ephemeral
+                });
+            } else {
+                // Join giveaway
+                addGiveawayParticipant(giveawayId, interaction.user.id);
+                await interaction.reply({ 
+                    content: '✅ Anda telah ikut giveaway! Semoga beruntung! 🎉', 
+                    flags: 64 // Ephemeral
+                });
+            }
+            return;
+        }
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
     const command = client.commands.get(interaction.commandName);
@@ -530,6 +600,166 @@ client.on(Events.GuildBanAdd, async (ban) => {
     }
 });
 
+// Function to check and end expired giveaways
+async function checkExpiredGiveaways(client: Client): Promise<void> {
+    try {
+        const { getExpiredGiveaways, endGiveaway, getGiveawayParticipants } = await import('./database/db.js');
+        const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import('discord.js');
+        const { getFooterText } = await import('./settings/bot.js');
+        
+        const expiredGiveaways = getExpiredGiveaways();
+        
+        if (expiredGiveaways.length === 0) {
+            return;
+        }
+
+        console.log(`[GIVEAWAY] Menemukan ${expiredGiveaways.length} giveaway yang berakhir.`);
+
+        for (const giveaway of expiredGiveaways) {
+            try {
+                // Get participants
+                const participants = getGiveawayParticipants(giveaway.id);
+
+                // Select winners
+                const selectWinners = (participants: string[], winnerCount: number): string[] => {
+                    if (participants.length === 0) return [];
+                    const shuffled = [...participants].sort(() => Math.random() - 0.5);
+                    return shuffled.slice(0, Math.min(winnerCount, participants.length));
+                };
+
+                const winners = selectWinners(participants, giveaway.winner_count);
+
+                // End giveaway in database
+                endGiveaway(giveaway.id, winners);
+
+                // Try to update the original message
+                const guild = await client.guilds.fetch(giveaway.guild_id).catch(() => null);
+                if (!guild) continue;
+
+                const channel = await guild.channels.fetch(giveaway.channel_id).catch(() => null);
+                if (!channel || !channel.isTextBased()) continue;
+
+                const message = await channel.messages.fetch(giveaway.message_id).catch(() => null);
+                if (!message) continue;
+
+                // Disable button
+                const disabledButton = new ButtonBuilder()
+                    .setCustomId(`giveaway_join_${giveaway.id}`)
+                    .setLabel('Giveaway Berakhir')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('🎁')
+                    .setDisabled(true);
+
+                const row = new ActionRowBuilder<ButtonBuilder>()
+                    .addComponents(disabledButton);
+
+                // Create ended embed
+                const endedEmbed = new EmbedBuilder()
+                    .setTitle('🎉 Giveaway Berakhir!')
+                    .setDescription(
+                        (giveaway.request ? `**Request:** ${giveaway.request}\n\n` : '') +
+                        `**Pemenang:** ${giveaway.winner_count} ${giveaway.winner_count === 1 ? 'orang' : 'orang'}\n` +
+                        (giveaway.role_requirement ? `**Role Diperlukan:** <@&${giveaway.role_requirement}>\n` : '') +
+                        `**Total Peserta:** ${participants.length} ${participants.length === 1 ? 'orang' : 'orang'}\n\n` +
+                        (winners.length > 0 
+                            ? `**🎊 Pemenang:**\n${winners.map((id, index) => `${index + 1}. <@${id}>`).join('\n')}`
+                            : '**Tidak ada pemenang** (tidak ada peserta yang memenuhi syarat)'
+                        )
+                    )
+                    .setColor(0xFFA500)
+                    .setTimestamp()
+                    .setFooter({ 
+                        text: getFooterText('Giveaway berakhir otomatis'), 
+                        iconURL: client.user?.displayAvatarURL({ forceStatic: false }) || undefined 
+                    });
+
+                await message.edit({ embeds: [endedEmbed], components: [row] });
+
+                // Mention creator and send announcement
+                try {
+                    const creator = await guild.members.fetch(giveaway.creator_id).catch(() => null);
+                    if (creator) {
+                        const announcementText = winners.length > 0
+                            ? `🎉 **Giveaway Berakhir!** <@${giveaway.creator_id}>\n\n**🎊 Pemenang:**\n${winners.map((id, index) => `${index + 1}. <@${id}>`).join('\n')}`
+                            : `🎉 **Giveaway Berakhir!** <@${giveaway.creator_id}>\n\n**Tidak ada pemenang** (tidak ada peserta yang memenuhi syarat)`;
+                        
+                        await channel.send({ content: announcementText });
+                    }
+                } catch (error) {
+                    console.error(`[GIVEAWAY] Error sending announcement for ${giveaway.id}:`, error);
+                }
+
+                // Send DM to winners
+                if (winners.length > 0) {
+                    for (const winnerId of winners) {
+                        try {
+                            const winner = await client.users.fetch(winnerId).catch(() => null);
+                            if (winner) {
+                                const dmEmbed = new EmbedBuilder()
+                                    .setTitle('🎉 Selamat! Anda Menang Giveaway!')
+                                    .setDescription(
+                                        `Anda telah memenangkan giveaway di **${guild.name}**!\n\n` +
+                                        `**Giveaway ID:** \`${giveaway.id}\`\n` +
+                                        (giveaway.request ? `**Request:** ${giveaway.request}\n` : '') +
+                                        `**Total Peserta:** ${participants.length} ${participants.length === 1 ? 'orang' : 'orang'}\n` +
+                                        `**Jumlah Pemenang:** ${giveaway.winner_count} ${giveaway.winner_count === 1 ? 'orang' : 'orang'}`
+                                    )
+                                    .setColor(0x00FF00)
+                                    .setTimestamp()
+                                    .setFooter({ 
+                                        text: getFooterText(`Selamat! 🎊`), 
+                                        iconURL: guild.iconURL({ forceStatic: false }) || undefined 
+                                    });
+
+                                await winner.send({ embeds: [dmEmbed] }).catch(() => {
+                                    // User has DMs disabled, ignore
+                                });
+                            }
+                        } catch (error) {
+                            // Failed to send DM, ignore
+                            console.error(`[GIVEAWAY] Error sending DM to winner ${winnerId}:`, error);
+                        }
+                    }
+                }
+
+                console.log(`[GIVEAWAY] Giveaway ${giveaway.id} berhasil diakhiri.`);
+            } catch (error) {
+                console.error(`[GIVEAWAY] Error ending giveaway ${giveaway.id}:`, error);
+            }
+        }
+    } catch (error) {
+        console.error('[GIVEAWAY] Error checking expired giveaways:', error);
+    }
+}
+
+// Function to cleanup old ended giveaways (older than 1 day)
+async function cleanupOldGiveaways(): Promise<void> {
+    try {
+        const { getOldEndedGiveaways, deleteGiveaway } = await import('./database/db.js');
+        
+        const oldGiveaways = getOldEndedGiveaways();
+        
+        if (oldGiveaways.length === 0) {
+            return;
+        }
+
+        console.log(`[GIVEAWAY] Menemukan ${oldGiveaways.length} giveaway lama yang akan dihapus.`);
+
+        for (const giveaway of oldGiveaways) {
+            try {
+                const deleted = deleteGiveaway(giveaway.id);
+                if (deleted) {
+                    console.log(`[GIVEAWAY] Giveaway ${giveaway.id} berhasil dihapus (lebih dari 1 hari sejak berakhir).`);
+                }
+            } catch (error) {
+                console.error(`[GIVEAWAY] Error deleting old giveaway ${giveaway.id}:`, error);
+            }
+        }
+    } catch (error) {
+        console.error('[GIVEAWAY] Error cleaning up old giveaways:', error);
+    }
+}
+
 // Register slash commands on ready
 client.once(Events.ClientReady, async () => {
     if (!client.user) return;
@@ -552,6 +782,22 @@ client.once(Events.ClientReady, async () => {
     } catch (error) {
         console.error('[ERROR] Failed to initialize database:', error);
     }
+    
+    // Check and end expired giveaways
+    await checkExpiredGiveaways(client);
+    
+    // Cleanup old ended giveaways (older than 1 day)
+    await cleanupOldGiveaways();
+    
+    // Set up periodic check for expired giveaways (every 10 seconds for faster response)
+    setInterval(async () => {
+        await checkExpiredGiveaways(client);
+    }, 10000); // Check every 10 seconds
+    
+    // Set up periodic cleanup for old giveaways (every hour)
+    setInterval(async () => {
+        await cleanupOldGiveaways();
+    }, 3600000); // Check every hour
     
     // Start activity rotation system
     startActivityRotation(client);
