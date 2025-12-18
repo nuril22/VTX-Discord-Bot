@@ -22,6 +22,7 @@ const categoryColors: { [key: string]: number } = {
     'economy': 0x00FF00,    // Green
     'gambling': 0xFFD700,   // Gold
     'rpg': 0x9B59B6,        // Purple
+    'leveling': 0x3498DB,   // Blue
     'moderator': 0xFF6B6B,  // Coral Red
     'other': 0x2C2F33       // Dark gray
 };
@@ -32,6 +33,7 @@ const categoryEmojis: { [key: string]: string } = {
     'economy': '💰',
     'gambling': '🎰',
     'rpg': '⚔️',
+    'leveling': '📊',
     'moderator': '🛡️',
     'other': '📋'
 };
@@ -42,6 +44,7 @@ const categoryNames: { [key: string]: string } = {
     'economy': 'Economy',
     'gambling': 'Gambling',
     'rpg': 'RPG',
+    'leveling': 'Leveling',
     'moderator': 'Moderator',
     'other': 'Lainnya'
 };
@@ -52,6 +55,7 @@ const categoryDescriptions: { [key: string]: string } = {
     'economy': 'Commands sistem keuangan',
     'gambling': 'Commands permainan judi',
     'rpg': 'Commands sistem RPG dan mining',
+    'leveling': 'Commands untuk melihat level, XP, dan leaderboard',
     'moderator': 'Commands untuk moderasi server',
     'giveaway': 'Commands untuk giveaway',
     'other': 'Commands lainnya'

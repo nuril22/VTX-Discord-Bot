@@ -143,6 +143,15 @@ export async function initDatabase(): Promise<void> {
         // Initialize giveaway tables
         await initGiveawayTables();
 
+        // VIP users table for animelovers feature
+        globalsDb.exec(`
+            CREATE TABLE IF NOT EXISTS vip_users (
+                user_id TEXT PRIMARY KEY,
+                is_vip INTEGER DEFAULT 0,
+                last_animelovers_use TEXT
+            )
+        `);
+
         console.log('[DB] Globals database tables initialized');
     } catch (error) {
         console.error('[DB] Error initializing database:', error);
@@ -899,6 +908,113 @@ export function canRerollGiveaway(id: string): boolean {
     } catch (error) {
         console.error('[DB] Error checking if giveaway can be rerolled:', error);
         return false;
+    }
+}
+
+// ========== VIP USERS SYSTEM (using globals.db) ==========
+
+// Check if user is VIP
+export function isVipUser(userId: string): boolean {
+    try {
+        const stmt = globalsDb.prepare('SELECT is_vip FROM vip_users WHERE user_id = ?');
+        const row = stmt.get(userId) as { is_vip: number } | undefined;
+        return row ? row.is_vip === 1 : false;
+    } catch (error) {
+        console.error('[DB] Error checking VIP user:', error);
+        return false;
+    }
+}
+
+// Set VIP status for user
+export function setVipUser(userId: string, isVip: boolean): void {
+    try {
+        const stmt = globalsDb.prepare('INSERT OR REPLACE INTO vip_users (user_id, is_vip) VALUES (?, ?)');
+        stmt.run(userId, isVip ? 1 : 0);
+    } catch (error) {
+        console.error('[DB] Error setting VIP user:', error);
+        throw error;
+    }
+}
+
+// Get last animelovers use date
+export function getLastAnimeloversUse(userId: string): string | null {
+    try {
+        const stmt = globalsDb.prepare('SELECT last_animelovers_use FROM vip_users WHERE user_id = ?');
+        const row = stmt.get(userId) as { last_animelovers_use: string | null } | undefined;
+        return row?.last_animelovers_use || null;
+    } catch (error) {
+        console.error('[DB] Error getting last animelovers use:', error);
+        return null;
+    }
+}
+
+// Set last animelovers use date
+export function setLastAnimeloversUse(userId: string, date: string): void {
+    try {
+        // Ensure user exists in table
+        const checkStmt = globalsDb.prepare('SELECT user_id FROM vip_users WHERE user_id = ?');
+        const exists = checkStmt.get(userId);
+        
+        if (exists) {
+            const stmt = globalsDb.prepare('UPDATE vip_users SET last_animelovers_use = ? WHERE user_id = ?');
+            stmt.run(date, userId);
+        } else {
+            const stmt = globalsDb.prepare('INSERT INTO vip_users (user_id, last_animelovers_use) VALUES (?, ?)');
+            stmt.run(userId, date);
+        }
+    } catch (error) {
+        console.error('[DB] Error setting last animelovers use:', error);
+        throw error;
+    }
+}
+
+// ========== LEADERBOARD SYSTEM ==========
+
+// Get top users by level (from mining_users)
+export function getTopUsersByLevel(limit: number = 10, userIds?: string[]): Array<{ user_id: string; level: number; xp: number }> {
+    try {
+        let query = 'SELECT user_id, level, xp FROM mining_users';
+        const params: any[] = [];
+        
+        if (userIds && userIds.length > 0) {
+            const placeholders = userIds.map(() => '?').join(',');
+            query += ` WHERE user_id IN (${placeholders})`;
+            params.push(...userIds);
+        }
+        
+        query += ' ORDER BY level DESC, xp DESC LIMIT ?';
+        params.push(limit);
+        
+        const stmt = db.prepare(query);
+        const rows = stmt.all(...params) as Array<{ user_id: string; level: number; xp: number }>;
+        return rows || [];
+    } catch (error) {
+        console.error('[DB] Error getting top users by level:', error);
+        return [];
+    }
+}
+
+// Get top users by balance (from users)
+export function getTopUsersByBalance(limit: number = 10, userIds?: string[]): Array<{ user_id: string; balance: number }> {
+    try {
+        let query = 'SELECT user_id, balance FROM users WHERE registered = 1';
+        const params: any[] = [];
+        
+        if (userIds && userIds.length > 0) {
+            const placeholders = userIds.map(() => '?').join(',');
+            query += ` AND user_id IN (${placeholders})`;
+            params.push(...userIds);
+        }
+        
+        query += ' ORDER BY balance DESC LIMIT ?';
+        params.push(limit);
+        
+        const stmt = db.prepare(query);
+        const rows = stmt.all(...params) as Array<{ user_id: string; balance: number }>;
+        return rows || [];
+    } catch (error) {
+        console.error('[DB] Error getting top users by balance:', error);
+        return [];
     }
 }
 

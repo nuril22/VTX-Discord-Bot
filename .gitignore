@@ -111,3 +111,5 @@ out/
 *.pem
 .cache/
 
+# Project specific
+commands/utility/animelovers.ts

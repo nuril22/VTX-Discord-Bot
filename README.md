@@ -1,4 +1,4 @@
-# 🤖 Discord Bot
+# 🤖 VTX Discord Bot
 
 <div align="center">
 
@@ -6,6 +6,18 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.3.3-blue.svg?logo=typescript&logoColor=white)
 ![Bun](https://img.shields.io/badge/Bun-Latest-black.svg?logo=bun&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
+
+### 📊 Repository Statistics
+
+[![GitHub Stars](https://img.shields.io/github/stars/nuril22/VTX-Discord-Bot?style=for-the-badge&logo=github&logoColor=white&labelColor=181717&color=yellow)](https://github.com/nuril22/VTX-Discord-Bot/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/nuril22/VTX-Discord-Bot?style=for-the-badge&logo=github&logoColor=white&labelColor=181717&color=blue)](https://github.com/nuril22/VTX-Discord-Bot/forks)
+[![GitHub Issues](https://img.shields.io/github/issues/nuril22/VTX-Discord-Bot?style=for-the-badge&logo=github&logoColor=white&labelColor=181717&color=orange)](https://github.com/nuril22/VTX-Discord-Bot/issues)
+
+---
+
+[![Typing SVG](https://readme-typing-svg.demolab.com/?lines=Welcome+to+VTX+Discord+Bot!;Built+with+Discord.js+%26+TypeScript;Rich+Features+%26+Easy+to+Use;Economy+%7C+RPG+%7C+Moderation+%7C+More&center=true&vCenter=true&width=600&height=80&size=30&color=58A6FF&font=monospace&duration=4000&pause=1000&repeat=true)](https://github.com/nuril22/VTX-Discord-Bot)
+
+---
 
 **Bot Discord yang kaya fitur dibangun dengan Discord.js v14, TypeScript, dan Bun**
 
@@ -42,6 +54,16 @@
 - Manajemen inventory
 - Sistem rebirth dengan bonus
 - Sistem store untuk membeli item
+
+### 📊 Sistem Leveling
+- **Leaderboard** - Lihat ranking user berdasarkan level atau uang
+  - Filter global atau per server
+  - Menampilkan top 10 user dengan medali emoji
+  - Menampilkan peringkat user yang menjalankan command
+- **XP Tracker** - Lihat statistik level dan XP
+  - Progress bar visual untuk XP
+  - Informasi XP yang diperlukan untuk level berikutnya
+  - Dapat melihat XP user lain
 
 ### 🛡️ Sistem Moderation
 - **Kick** - Mengeluarkan user dari server
@@ -273,6 +295,22 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&
 | `/sell` | Jual item | `/sell item:iron quantity:5` |
 | `/rebirth` | Rebirth untuk mendapatkan bonus | `/rebirth` |
 
+### 📊 Leveling
+
+| Command | Deskripsi | Penggunaan |
+|---------|-----------|------------|
+| `/leaderboard` | Lihat leaderboard user | `/leaderboard [tipe:level/uang] [global:yes/no]` |
+| `/xp` | Lihat level dan XP | `/xp [user:@user]` |
+
+**Parameter Leaderboard:**
+- `tipe` - Tipe leaderboard: `level` (default) atau `uang`
+- `global` - Tampilkan global (`yes`) atau hanya server ini (`no`, default)
+
+**Catatan:**
+- Leaderboard menampilkan top 10 user dengan medali emoji untuk 3 teratas
+- Peringkat user yang menjalankan command ditampilkan di footer
+- XP command menampilkan progress bar visual dan informasi XP yang diperlukan untuk level berikutnya
+
 ### 🎁 Giveaway
 
 | Command | Deskripsi | Penggunaan |
@@ -343,6 +381,9 @@ dcbot/
 │   │   ├── rpg-profile.ts
 │   │   ├── sell.ts
 │   │   └── store.ts
+│   ├── leveling/         # Command sistem leveling
+│   │   ├── leaderboard.ts
+│   │   └── xp.ts
 │   ├── giveaway/        # Command sistem giveaway
 │   │   ├── gcreate.ts
 │   │   ├── gend.ts
@@ -378,6 +419,7 @@ Bot menggunakan database SQLite:
 
 - **`db/economy.db`** - Data sistem Economy dan RPG
   - Users, transactions, mining data, inventory, equipment
+  - Leaderboard data (level, XP, balance)
 
 - **`db/globals.db`** - Data global bot
   - Warnings, pengaturan warning per server
@@ -471,5 +513,13 @@ Jika Anda menemukan masalah atau memiliki pertanyaan:
 **Dibuat dengan ❤️ menggunakan Discord.js, TypeScript, dan Bun**
 
 ⭐ Berikan star pada repo ini jika Anda merasa membantu!
+
+---
+
+### 🍴 Fork The Repository
+
+<a href="https://github.com/nuril22/VTX-Discord-Bot/fork">
+  <img src="https://img.shields.io/badge/FORK%20REPO-NOW-red?style=for-the-badge&logo=github&logoColor=white" alt="Fork Repo" />
+</a>
 
 </div>
