@@ -6,7 +6,8 @@ import {
     ActionRowBuilder, 
     StringSelectMenuBuilder, 
     StringSelectMenuInteraction,
-    ComponentType
+    ComponentType,
+    ApplicationCommandOptionType
 } from 'discord.js';
 import { getFooterText } from '../../settings/bot.js';
 
@@ -24,6 +25,10 @@ const categoryColors: { [key: string]: number } = {
     'rpg': 0x9B59B6,        // Purple
     'leveling': 0x3498DB,   // Blue
     'moderator': 0xFF6B6B,  // Coral Red
+    'giveaway': 0xFFA500,   // Orange
+    'ticket': 0xFFD700,     // Gold
+    'fun': 0xFF69B4,        // Hot Pink
+    'ai': 0x00D9FF,         // Cyan
     'other': 0x2C2F33       // Dark gray
 };
 
@@ -35,6 +40,10 @@ const categoryEmojis: { [key: string]: string } = {
     'rpg': '⚔️',
     'leveling': '📊',
     'moderator': '🛡️',
+    'giveaway': '🎁',
+    'ticket': '🎫',
+    'fun': '🎮',
+    'ai': '🤖',
     'other': '📋'
 };
 
@@ -46,6 +55,10 @@ const categoryNames: { [key: string]: string } = {
     'rpg': 'RPG',
     'leveling': 'Leveling',
     'moderator': 'Moderator',
+    'giveaway': 'Giveaway',
+    'ticket': 'Ticket',
+    'fun': 'Fun',
+    'ai': 'AI',
     'other': 'Lainnya'
 };
 
@@ -58,6 +71,9 @@ const categoryDescriptions: { [key: string]: string } = {
     'leveling': 'Commands untuk melihat level, XP, dan leaderboard',
     'moderator': 'Commands untuk moderasi server',
     'giveaway': 'Commands untuk giveaway',
+    'ticket': 'Commands untuk sistem ticket',
+    'fun': 'Commands untuk hiburan dan fun',
+    'ai': 'Commands untuk AI chat system',
     'other': 'Commands lainnya'
 };
 
@@ -81,11 +97,31 @@ export default {
         // Collect all commands with their categories
         for (const [name, command] of client.commands.entries()) {
             if ('data' in command) {
-                commands.push({
-                    name: command.data.name,
-                    description: command.data.description || 'Tidak ada deskripsi',
-                    category: (command as any).category || 'other'
-                });
+                const commandData = command.data;
+                const category = (command as any).category || 'other';
+                
+                // Check if command has subcommands
+                const hasSubcommands = commandData.options && commandData.options.some((opt: any) => opt.type === ApplicationCommandOptionType.Subcommand);
+                
+                if (hasSubcommands) {
+                    // Add each subcommand as a separate entry
+                    for (const option of commandData.options) {
+                        if (option.type === ApplicationCommandOptionType.Subcommand) {
+                            commands.push({
+                                name: `${commandData.name} ${option.name}`,
+                                description: option.description || 'Tidak ada deskripsi',
+                                category: category
+                            });
+                        }
+                    }
+                } else {
+                    // Regular command without subcommands
+                    commands.push({
+                        name: commandData.name,
+                        description: commandData.description || 'Tidak ada deskripsi',
+                        category: category
+                    });
+                }
             }
         }
 
@@ -248,7 +284,11 @@ export default {
             // Format commands list dengan bullet points yang lebih menarik
             const commandsList = categoryCommands
                 .map((cmd, index) => {
-                    return `**${index + 1}.** \`/${cmd.name}\`\n   ${cmd.description}`;
+                    // Format: /ticket setup atau /command
+                    const formattedName = cmd.name.includes(' ') 
+                        ? `\`/${cmd.name}\`` 
+                        : `\`/${cmd.name}\``;
+                    return `**${index + 1}.** ${formattedName}\n   ${cmd.description}`;
                 })
                 .join('\n\n');
 

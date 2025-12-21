@@ -93,6 +93,23 @@
 - **Help** - Sistem bantuan interaktif dengan pemilihan kategori
 - **Instagram Downloader** - Download video dari Instagram Reels
 
+### 🎫 Sistem Ticket
+- **Setup Ticket** - Konfigurasi channel dan role untuk ticket system
+- **Create Ticket** - Buat ticket baru (via command atau button)
+- **Close Ticket** - Tutup ticket saat ini
+- **Delete Ticket** - Hapus ticket (staff only)
+- **Remove User** - Hapus user dari ticket
+- Kategori "Tickets" dibuat otomatis
+- Data ticket tersimpan di database
+
+### 🤖 Sistem AI Chat
+- **AI Setup** - Setup channel untuk AI chat system
+- **AI Create** - Buat channel AI chat pribadi
+- **AI Delete** - Hapus session AI chat
+- AI memahami konteks Discord
+- AI dapat menutup session sendiri
+- Session tersimpan di database
+
 ### 🔐 Command Owner
 - Command eval (eksekusi kode JavaScript)
 - Manajemen activity
@@ -331,6 +348,35 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&
 - Data giveaway otomatis dihapus setelah 1 hari sejak berakhir
 - Reroll hanya bisa dilakukan dalam 1 hari setelah giveaway berakhir
 
+### 🎫 Ticket
+
+| Command | Deskripsi | Penggunaan |
+|---------|-----------|------------|
+| `/ticket setup` | Setup channel dan role untuk ticket system (mod only) | `/ticket setup channel:#channel [role:@role] [deskripsi:text]` |
+| `/ticket create` | Buat ticket baru | `/ticket create` |
+| `/ticket close` | Tutup ticket saat ini | `/ticket close` |
+| `/ticket delete` | Hapus ticket saat ini (staff only) | `/ticket delete` |
+| `/ticket remove` | Hapus user dari ticket | `/ticket remove user:@user` |
+
+**Catatan:**
+- Ticket dapat dibuat via command atau button di embed setup
+- Data ticket otomatis terhapus saat ticket ditutup
+- Kategori "Tickets" dibuat otomatis
+
+### 🤖 AI Chat
+
+| Command | Deskripsi | Penggunaan |
+|---------|-----------|------------|
+| `/ai-setup` | Setup channel untuk AI chat system (mod only) | `/ai-setup channel:#channel` |
+| `/ai-create` | Buat channel AI chat pribadi | `/ai-create` |
+| `/ai-delete` | Hapus session AI chat Anda | `/ai-delete` |
+
+**Catatan:**
+- AI dapat memahami konteks Discord
+- AI dapat menutup session sendiri (ketik "close", "delete", "tutup", atau "hapus")
+- Kategori "AI Chat" dibuat otomatis
+- Session ID digunakan sebagai nama channel
+
 ### 🛠️ Utility
 
 | Command | Deskripsi | Penggunaan |
@@ -389,6 +435,12 @@ dcbot/
 │   │   ├── gend.ts
 │   │   ├── greroll.ts
 │   │   └── glist.ts
+│   ├── ticket/          # Command sistem ticket
+│   │   └── ticket.ts
+│   ├── ai/              # Command sistem AI chat
+│   │   ├── ai-setup.ts
+│   │   ├── ai-create.ts
+│   │   └── ai-delete.ts
 │   └── utility/          # Command utility
 │       ├── botinfo.ts
 │       ├── help.ts
@@ -424,8 +476,116 @@ Bot menggunakan database SQLite:
 - **`db/globals.db`** - Data global bot
   - Warnings, pengaturan warning per server
   - Giveaways (data giveaway, peserta, pemenang)
+  - Ticket configs dan sessions
+  - AI configs dan sessions
 
 Database otomatis dibuat saat pertama kali dijalankan.
+
+### Menambahkan Database untuk Command Baru
+
+Jika Anda ingin membuat command yang menggunakan database, ikuti langkah berikut:
+
+#### 1. Tambahkan Tabel di `database/db.ts`
+
+Tambahkan fungsi inisialisasi tabel di fungsi `initDatabase()`:
+
+```typescript
+// Di dalam initDatabase(), tambahkan:
+globalsDb.exec(`
+    CREATE TABLE IF NOT EXISTS your_table_name (
+        id TEXT PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        data TEXT,
+        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+    )
+`);
+```
+
+#### 2. Buat Fungsi CRUD
+
+Tambahkan fungsi untuk Create, Read, Update, Delete:
+
+```typescript
+// Create
+export function createYourData(id: string, guildId: string, userId: string, data: string): void {
+    try {
+        const stmt = globalsDb.prepare('INSERT INTO your_table_name (id, guild_id, user_id, data) VALUES (?, ?, ?, ?)');
+        stmt.run(id, guildId, userId, data);
+    } catch (error) {
+        console.error('[DB] Error creating data:', error);
+        throw error;
+    }
+}
+
+// Read
+export function getYourData(id: string): { id: string; guild_id: string; user_id: string; data: string } | null {
+    try {
+        const stmt = globalsDb.prepare('SELECT * FROM your_table_name WHERE id = ?');
+        const row = stmt.get(id) as { id: string; guild_id: string; user_id: string; data: string } | undefined;
+        return row || null;
+    } catch (error) {
+        console.error('[DB] Error getting data:', error);
+        return null;
+    }
+}
+
+// Update
+export function updateYourData(id: string, data: string): void {
+    try {
+        const stmt = globalsDb.prepare('UPDATE your_table_name SET data = ? WHERE id = ?');
+        stmt.run(data, id);
+    } catch (error) {
+        console.error('[DB] Error updating data:', error);
+        throw error;
+    }
+}
+
+// Delete
+export function deleteYourData(id: string): void {
+    try {
+        const stmt = globalsDb.prepare('DELETE FROM your_table_name WHERE id = ?');
+        stmt.run(id);
+    } catch (error) {
+        console.error('[DB] Error deleting data:', error);
+        throw error;
+    }
+}
+```
+
+#### 3. Import dan Gunakan di Command
+
+```typescript
+import { createYourData, getYourData, updateYourData, deleteYourData } from '../../database/db.js';
+
+// Di dalam execute function:
+const data = getYourData('some-id');
+if (!data) {
+    createYourData('some-id', guild.id, user.id, 'some data');
+} else {
+    updateYourData('some-id', 'updated data');
+}
+```
+
+#### 4. Inisialisasi Tabel
+
+Pastikan tabel diinisialisasi dengan memanggil fungsi inisialisasi di `initDatabase()`:
+
+```typescript
+// Di database/db.ts, tambahkan di initDatabase():
+export async function initDatabase(): Promise<void> {
+    // ... kode yang ada ...
+    
+    // Tambahkan inisialisasi tabel baru Anda
+    await initYourTables(); // atau langsung di initDatabase()
+}
+```
+
+**Catatan:**
+- Gunakan `globalsDb` untuk data global (warnings, tickets, AI, dll)
+- Gunakan `db` (economyDb) untuk data economy dan RPG
+- Selalu gunakan try-catch untuk error handling
+- Gunakan prepared statements untuk mencegah SQL injection
 
 ---
 
@@ -461,6 +621,182 @@ Bot dilengkapi file watcher yang otomatis me-reload command saat file berubah. T
 
 ---
 
+## 🚀 Deployment
+
+### Deploy ke VPS (Linux)
+
+#### 1. Persiapan Server
+
+```bash
+# Update sistem
+sudo apt update && sudo apt upgrade -y
+
+# Install Bun
+curl -fsSL https://bun.sh/install | bash
+source ~/.bashrc
+
+# Install yt-dlp
+pip install yt-dlp
+
+# Install ffmpeg (opsional)
+sudo apt install ffmpeg -y
+```
+
+#### 2. Clone dan Setup Project
+
+```bash
+# Clone repository
+git clone https://github.com/nuril22/VTX-Discord-Bot.git
+cd VTX-Discord-Bot
+
+# Install dependencies
+bun install
+
+# Buat file .env
+nano .env
+# Isi dengan TOKEN, CLIENT_ID, dll
+```
+
+#### 3. Setup Process Manager (PM2)
+
+```bash
+# Install PM2
+npm install -g pm2
+
+# Buat file ecosystem.config.js
+cat > ecosystem.config.js << EOF
+module.exports = {
+  apps: [{
+    name: 'dcbot',
+    script: 'bun',
+    args: 'start',
+    cwd: '/path/to/VTX-Discord-Bot',
+    instances: 1,
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '1G',
+    env: {
+      NODE_ENV: 'production'
+    }
+  }]
+}
+EOF
+
+# Start bot dengan PM2
+pm2 start ecosystem.config.js
+
+# Setup PM2 untuk auto-start saat reboot
+pm2 startup
+pm2 save
+```
+
+#### 4. Setup Nginx (Opsional, untuk monitoring)
+
+```bash
+# Install Nginx
+sudo apt install nginx -y
+
+# Buat config (jika diperlukan)
+sudo nano /etc/nginx/sites-available/dcbot
+```
+
+### Deploy ke Cloud Platform
+
+#### Railway
+
+1. Fork repository ke GitHub
+2. Login ke [Railway](https://railway.app)
+3. New Project → Deploy from GitHub
+4. Pilih repository
+5. Add environment variables:
+   - `TOKEN`
+   - `CLIENT_ID`
+   - `PREFIX` (opsional)
+   - `OWNER_IDS` (opsional)
+6. Deploy
+
+#### Render
+
+1. Fork repository ke GitHub
+2. Login ke [Render](https://render.com)
+3. New → Web Service
+4. Connect GitHub repository
+5. Settings:
+   - **Build Command**: `bun install`
+   - **Start Command**: `bun start`
+6. Add environment variables
+7. Deploy
+
+#### Heroku
+
+1. Install Heroku CLI
+2. Login: `heroku login`
+3. Create app: `heroku create your-app-name`
+4. Set buildpack: `heroku buildpacks:set https://github.com/oven-sh/bun`
+5. Set environment variables: `heroku config:set TOKEN=your_token`
+6. Deploy: `git push heroku main`
+
+### Deploy dengan Docker (Opsional)
+
+```dockerfile
+# Dockerfile
+FROM oven/bun:latest
+
+WORKDIR /app
+
+COPY package.json bun.lockb ./
+RUN bun install
+
+COPY . .
+
+CMD ["bun", "start"]
+```
+
+```bash
+# Build image
+docker build -t dcbot .
+
+# Run container
+docker run -d --name dcbot --env-file .env dcbot
+```
+
+### Monitoring dan Maintenance
+
+#### Logs
+
+```bash
+# PM2 logs
+pm2 logs dcbot
+
+# Docker logs
+docker logs dcbot -f
+```
+
+#### Restart Bot
+
+```bash
+# PM2
+pm2 restart dcbot
+
+# Docker
+docker restart dcbot
+```
+
+#### Update Bot
+
+```bash
+# Pull latest changes
+git pull origin main
+
+# Install new dependencies (jika ada)
+bun install
+
+# Restart bot
+pm2 restart dcbot
+```
+
+---
+
 ## 📝 Catatan
 
 - **Keamanan Token**: Jangan pernah commit file `.env` atau bot token ke version control
@@ -469,6 +805,8 @@ Bot dilengkapi file watcher yang otomatis me-reload command saat file berubah. T
 - **Ukuran File**: Discord memiliki batas upload file 25MB (100MB untuk server yang di-boost)
 - **Instagram Downloader**: Memerlukan yt-dlp dan menggunakan cookies browser untuk autentikasi
 - **Kompresi Video**: Video besar otomatis dikompres menggunakan ffmpeg jika tersedia
+- **Database**: File database SQLite akan dibuat otomatis di folder `db/` saat pertama kali dijalankan
+- **Backup Database**: Disarankan untuk backup database secara berkala, terutama `db/economy.db` dan `db/globals.db`
 
 ---
 

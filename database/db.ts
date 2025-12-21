@@ -143,6 +143,12 @@ export async function initDatabase(): Promise<void> {
         // Initialize giveaway tables
         await initGiveawayTables();
 
+        // Initialize ticket tables
+        await initTicketTables();
+
+        // Initialize AI tables
+        await initAITables();
+
         // VIP users table for animelovers feature
         globalsDb.exec(`
             CREATE TABLE IF NOT EXISTS vip_users (
@@ -1014,6 +1020,301 @@ export function getTopUsersByBalance(limit: number = 10, userIds?: string[]): Ar
         return rows || [];
     } catch (error) {
         console.error('[DB] Error getting top users by balance:', error);
+        return [];
+    }
+}
+
+// ========== TICKET SYSTEM (using globals.db) ==========
+
+// Initialize ticket tables
+export async function initTicketTables(): Promise<void> {
+    try {
+        // Ticket config per guild
+        globalsDb.exec(`
+            CREATE TABLE IF NOT EXISTS ticket_configs (
+                guild_id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL,
+                role_id TEXT,
+                description TEXT,
+                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+            )
+        `);
+
+        // Active tickets
+        globalsDb.exec(`
+            CREATE TABLE IF NOT EXISTS tickets (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                creator_id TEXT NOT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                closed_at INTEGER,
+                is_closed INTEGER DEFAULT 0
+            )
+        `);
+
+        // Ticket members (users who have access to ticket)
+        globalsDb.exec(`
+            CREATE TABLE IF NOT EXISTS ticket_members (
+                ticket_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                added_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (ticket_id, user_id),
+                FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+            )
+        `);
+
+        console.log('[DB] Ticket tables initialized');
+    } catch (error) {
+        console.error('[DB] Error initializing ticket tables:', error);
+        throw error;
+    }
+}
+
+// Ticket config functions
+export function getTicketConfig(guildId: string): { channel_id: string; role_id: string | null; description: string | null } | null {
+    try {
+        const stmt = globalsDb.prepare('SELECT channel_id, role_id, description FROM ticket_configs WHERE guild_id = ?');
+        const row = stmt.get(guildId) as { channel_id: string; role_id: string | null; description: string | null } | undefined;
+        return row || null;
+    } catch (error) {
+        console.error('[DB] Error getting ticket config:', error);
+        return null;
+    }
+}
+
+export function setTicketConfig(guildId: string, channelId: string, roleId?: string | null, description?: string | null): void {
+    try {
+        const stmt = globalsDb.prepare('INSERT OR REPLACE INTO ticket_configs (guild_id, channel_id, role_id, description) VALUES (?, ?, ?, ?)');
+        stmt.run(guildId, channelId, roleId || null, description || null);
+    } catch (error) {
+        console.error('[DB] Error setting ticket config:', error);
+        throw error;
+    }
+}
+
+export function deleteTicketConfig(guildId: string): void {
+    try {
+        const stmt = globalsDb.prepare('DELETE FROM ticket_configs WHERE guild_id = ?');
+        stmt.run(guildId);
+    } catch (error) {
+        console.error('[DB] Error deleting ticket config:', error);
+        throw error;
+    }
+}
+
+// Ticket functions
+export function createTicket(ticketId: string, guildId: string, channelId: string, creatorId: string): void {
+    try {
+        const stmt = globalsDb.prepare('INSERT INTO tickets (id, guild_id, channel_id, creator_id) VALUES (?, ?, ?, ?)');
+        stmt.run(ticketId, guildId, channelId, creatorId);
+        
+        // Add creator as member
+        addTicketMember(ticketId, creatorId);
+    } catch (error) {
+        console.error('[DB] Error creating ticket:', error);
+        throw error;
+    }
+}
+
+export function getTicket(ticketId: string): { id: string; guild_id: string; channel_id: string; creator_id: string; created_at: number; closed_at: number | null; is_closed: number } | null {
+    try {
+        const stmt = globalsDb.prepare('SELECT * FROM tickets WHERE id = ?');
+        const row = stmt.get(ticketId) as { id: string; guild_id: string; channel_id: string; creator_id: string; created_at: number; closed_at: number | null; is_closed: number } | undefined;
+        return row || null;
+    } catch (error) {
+        console.error('[DB] Error getting ticket:', error);
+        return null;
+    }
+}
+
+export function getTicketByChannel(channelId: string): { id: string; guild_id: string; channel_id: string; creator_id: string; created_at: number; closed_at: number | null; is_closed: number } | null {
+    try {
+        const stmt = globalsDb.prepare('SELECT * FROM tickets WHERE channel_id = ?');
+        const row = stmt.get(channelId) as { id: string; guild_id: string; channel_id: string; creator_id: string; created_at: number; closed_at: number | null; is_closed: number } | undefined;
+        return row || null;
+    } catch (error) {
+        console.error('[DB] Error getting ticket by channel:', error);
+        return null;
+    }
+}
+
+export function getUserTickets(userId: string, guildId: string): Array<{ id: string; channel_id: string; created_at: number; is_closed: number }> {
+    try {
+        const stmt = globalsDb.prepare(`
+            SELECT t.id, t.channel_id, t.created_at, t.is_closed 
+            FROM tickets t
+            WHERE t.creator_id = ? AND t.guild_id = ?
+            ORDER BY t.created_at DESC
+        `);
+        const rows = stmt.all(userId, guildId) as Array<{ id: string; channel_id: string; created_at: number; is_closed: number }>;
+        return rows || [];
+    } catch (error) {
+        console.error('[DB] Error getting user tickets:', error);
+        return [];
+    }
+}
+
+export function closeTicket(ticketId: string): void {
+    try {
+        const stmt = globalsDb.prepare('UPDATE tickets SET is_closed = 1, closed_at = strftime("%s", "now") WHERE id = ?');
+        stmt.run(ticketId);
+    } catch (error) {
+        console.error('[DB] Error closing ticket:', error);
+        throw error;
+    }
+}
+
+export function deleteTicket(ticketId: string): void {
+    try {
+        // Delete members first (CASCADE should handle this, but explicit is better)
+        const deleteMembersStmt = globalsDb.prepare('DELETE FROM ticket_members WHERE ticket_id = ?');
+        deleteMembersStmt.run(ticketId);
+        
+        // Delete ticket
+        const deleteTicketStmt = globalsDb.prepare('DELETE FROM tickets WHERE id = ?');
+        deleteTicketStmt.run(ticketId);
+    } catch (error) {
+        console.error('[DB] Error deleting ticket:', error);
+        throw error;
+    }
+}
+
+// Ticket member functions
+export function addTicketMember(ticketId: string, userId: string): void {
+    try {
+        const stmt = globalsDb.prepare('INSERT OR IGNORE INTO ticket_members (ticket_id, user_id) VALUES (?, ?)');
+        stmt.run(ticketId, userId);
+    } catch (error) {
+        console.error('[DB] Error adding ticket member:', error);
+        throw error;
+    }
+}
+
+export function removeTicketMember(ticketId: string, userId: string): void {
+    try {
+        const stmt = globalsDb.prepare('DELETE FROM ticket_members WHERE ticket_id = ? AND user_id = ?');
+        stmt.run(ticketId, userId);
+    } catch (error) {
+        console.error('[DB] Error removing ticket member:', error);
+        throw error;
+    }
+}
+
+export function getTicketMembers(ticketId: string): string[] {
+    try {
+        const stmt = globalsDb.prepare('SELECT user_id FROM ticket_members WHERE ticket_id = ?');
+        const rows = stmt.all(ticketId) as Array<{ user_id: string }>;
+        return rows.map(row => row.user_id);
+    } catch (error) {
+        console.error('[DB] Error getting ticket members:', error);
+        return [];
+    }
+}
+
+// ========== AI CHAT SYSTEM (using globals.db) ==========
+
+// Initialize AI tables
+export async function initAITables(): Promise<void> {
+    try {
+        // AI config per guild
+        globalsDb.exec(`
+            CREATE TABLE IF NOT EXISTS ai_configs (
+                guild_id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+            )
+        `);
+
+        // AI sessions per channel
+        globalsDb.exec(`
+            CREATE TABLE IF NOT EXISTS ai_sessions (
+                channel_id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                creator_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+            )
+        `);
+
+        console.log('[DB] AI tables initialized');
+    } catch (error) {
+        console.error('[DB] Error initializing AI tables:', error);
+        throw error;
+    }
+}
+
+// AI config functions
+export function getAIConfig(guildId: string): { channel_id: string } | null {
+    try {
+        const stmt = globalsDb.prepare('SELECT channel_id FROM ai_configs WHERE guild_id = ?');
+        const row = stmt.get(guildId) as { channel_id: string } | undefined;
+        return row || null;
+    } catch (error) {
+        console.error('[DB] Error getting AI config:', error);
+        return null;
+    }
+}
+
+export function setAIConfig(guildId: string, channelId: string): void {
+    try {
+        const stmt = globalsDb.prepare('INSERT OR REPLACE INTO ai_configs (guild_id, channel_id) VALUES (?, ?)');
+        stmt.run(guildId, channelId);
+    } catch (error) {
+        console.error('[DB] Error setting AI config:', error);
+        throw error;
+    }
+}
+
+export function deleteAIConfig(guildId: string): void {
+    try {
+        const stmt = globalsDb.prepare('DELETE FROM ai_configs WHERE guild_id = ?');
+        stmt.run(guildId);
+    } catch (error) {
+        console.error('[DB] Error deleting AI config:', error);
+        throw error;
+    }
+}
+
+// AI session functions
+export function createAISession(channelId: string, guildId: string, creatorId: string, sessionId: string): void {
+    try {
+        const stmt = globalsDb.prepare('INSERT OR REPLACE INTO ai_sessions (channel_id, guild_id, creator_id, session_id) VALUES (?, ?, ?, ?)');
+        stmt.run(channelId, guildId, creatorId, sessionId);
+    } catch (error) {
+        console.error('[DB] Error creating AI session:', error);
+        throw error;
+    }
+}
+
+export function getAISession(channelId: string): { channel_id: string; guild_id: string; creator_id: string; session_id: string; created_at: number } | null {
+    try {
+        const stmt = globalsDb.prepare('SELECT * FROM ai_sessions WHERE channel_id = ?');
+        const row = stmt.get(channelId) as { channel_id: string; guild_id: string; creator_id: string; session_id: string; created_at: number } | undefined;
+        return row || null;
+    } catch (error) {
+        console.error('[DB] Error getting AI session:', error);
+        return null;
+    }
+}
+
+export function deleteAISession(channelId: string): void {
+    try {
+        const stmt = globalsDb.prepare('DELETE FROM ai_sessions WHERE channel_id = ?');
+        stmt.run(channelId);
+    } catch (error) {
+        console.error('[DB] Error deleting AI session:', error);
+        throw error;
+    }
+}
+
+export function getUserAISessions(userId: string, guildId: string): Array<{ channel_id: string; session_id: string }> {
+    try {
+        const stmt = globalsDb.prepare('SELECT channel_id, session_id FROM ai_sessions WHERE creator_id = ? AND guild_id = ?');
+        const rows = stmt.all(userId, guildId) as Array<{ channel_id: string; session_id: string }>;
+        return rows || [];
+    } catch (error) {
+        console.error('[DB] Error getting user AI sessions:', error);
         return [];
     }
 }

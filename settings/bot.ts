@@ -20,7 +20,7 @@ export interface BotConfig {
 
 // Default bot configuration
 export const botConfig: BotConfig = {
-    name: 'VTX-Bot',
+    name: 'FortBot',
     footerText: '⚡ powered VTX Group'
 };
 

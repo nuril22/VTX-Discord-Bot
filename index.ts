@@ -18,7 +18,8 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildModeration
+        GatewayIntentBits.GuildModeration,
+        GatewayIntentBits.GuildVoiceStates
     ]
 }) as Client & { commands: Collection<string, Command> };
 
@@ -421,11 +422,140 @@ client.on(Events.InteractionCreate, async interaction => {
 
             await interaction.respond(commands);
         }
+        
         return;
     }
 
     // Handle button interactions
     if (interaction.isButton()) {
+        // Handle ticket create button
+        if (interaction.customId === 'ticket_create') {
+            const { EmbedBuilder, ChannelType, MessageFlags } = await import('discord.js');
+            const { getFooterText } = await import('./settings/bot.js');
+            const { createTicket, getTicketConfig, getUserTickets } = await import('./database/db.js');
+
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+            const guild = interaction.guild;
+            if (!guild) {
+                return interaction.editReply({ content: '❌ Command ini hanya bisa digunakan di server!' });
+            }
+
+            // Check if ticket system is setup
+            const config = getTicketConfig(guild.id);
+            if (!config) {
+                const embed = new EmbedBuilder()
+                    .setTitle('❌ Error')
+                    .setDescription('Ticket system belum diatur!')
+                    .setColor(0xFF0000)
+                    .setTimestamp();
+
+                return interaction.editReply({ embeds: [embed] });
+            }
+
+            // Check if user already has an open ticket
+            const userTickets = getUserTickets(interaction.user.id, guild.id);
+            const openTicket = userTickets.find(t => t.is_closed === 0);
+            
+            if (openTicket) {
+                const embed = new EmbedBuilder()
+                    .setTitle('❌ Error')
+                    .setDescription(`Anda sudah memiliki ticket yang terbuka: <#${openTicket.channel_id}>`)
+                    .setColor(0xFF0000)
+                    .setTimestamp();
+
+                return interaction.editReply({ embeds: [embed] });
+            }
+
+            try {
+                // Get or create ticket category
+                let ticketCategory = guild.channels.cache.find(
+                    c => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === 'tickets'
+                );
+
+                if (!ticketCategory) {
+                    ticketCategory = await guild.channels.create({
+                        name: 'Tickets',
+                        type: ChannelType.GuildCategory,
+                        permissionOverwrites: [
+                            {
+                                id: guild.id,
+                                deny: ['ViewChannel'],
+                            },
+                        ],
+                    });
+                }
+
+                // Create ticket channel
+                const ticketId = `ticket-${interaction.user.id}-${Date.now()}`;
+                const ticketChannel = await guild.channels.create({
+                    name: ticketId,
+                    type: ChannelType.GuildText,
+                    parent: ticketCategory.id,
+                    permissionOverwrites: [
+                        {
+                            id: guild.id,
+                            deny: ['ViewChannel'],
+                        },
+                        {
+                            id: interaction.user.id,
+                            allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'],
+                        },
+                        {
+                            id: client.user!.id,
+                            allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'ManageChannels'],
+                        },
+                    ],
+                });
+
+                // Add role to channel if configured
+                if (config.role_id) {
+                    await ticketChannel.permissionOverwrites.edit(config.role_id, {
+                        ViewChannel: true,
+                        SendMessages: true,
+                        ReadMessageHistory: true,
+                    });
+                }
+
+                // Create ticket in database
+                createTicket(ticketId, guild.id, ticketChannel.id, interaction.user.id);
+
+                // Send welcome message
+                const welcomeEmbed = new EmbedBuilder()
+                    .setTitle('🎫 Ticket Dibuka')
+                    .setDescription(`Halo <@${interaction.user.id}>!\n\nTerima kasih telah membuat ticket. Silakan jelaskan masalah atau pertanyaan Anda.\n\n${config.role_id ? `<@&${config.role_id}> akan segera membantu Anda.` : 'Staff akan segera membantu Anda.'}\n\nGunakan \`/ticket close\` untuk menutup ticket ini.`)
+                    .setColor(0x00FF00)
+                    .setTimestamp()
+                    .setFooter({
+                        text: getFooterText(`Ticket ID: ${ticketId}`),
+                        iconURL: interaction.user.displayAvatarURL({ forceStatic: false }) || undefined
+                    });
+
+                await ticketChannel.send({ 
+                    content: config.role_id ? `<@&${config.role_id}>` : undefined,
+                    embeds: [welcomeEmbed] 
+                });
+
+                const successEmbed = new EmbedBuilder()
+                    .setTitle('✅ Ticket Berhasil Dibuat')
+                    .setDescription(`Ticket Anda telah dibuat: ${ticketChannel}`)
+                    .setColor(0x00FF00)
+                    .setTimestamp();
+
+                await interaction.editReply({ embeds: [successEmbed] });
+            } catch (error: any) {
+                console.error('[TICKET] Error creating ticket:', error);
+                const errorEmbed = new EmbedBuilder()
+                    .setTitle('❌ Error')
+                    .setDescription(`Gagal membuat ticket: ${error.message}`)
+                    .setColor(0xFF0000)
+                    .setTimestamp();
+
+                await interaction.editReply({ embeds: [errorEmbed] });
+            }
+            return;
+        }
+
         // Handle giveaway join button
         if (interaction.customId.startsWith('giveaway_join_')) {
             const giveawayId = interaction.customId.replace('giveaway_join_', '');
@@ -492,6 +622,142 @@ client.on(Events.InteractionCreate, async interaction => {
             }
             return;
         }
+
+        // Handle AI create button
+        if (interaction.customId === 'ai_create') {
+            const { EmbedBuilder, ChannelType, MessageFlags } = await import('discord.js');
+            const { getFooterText } = await import('./settings/bot.js');
+            const { createAISession, getAIConfig, getUserAISessions } = await import('./database/db.js');
+
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+            const guild = interaction.guild;
+            if (!guild) {
+                return interaction.editReply({ content: '❌ Command ini hanya bisa digunakan di server!' });
+            }
+
+            // Check if AI system is setup
+            const config = getAIConfig(guild.id);
+            if (!config) {
+                const embed = new EmbedBuilder()
+                    .setTitle('❌ Error')
+                    .setDescription('AI system belum diatur!')
+                    .setColor(0xFF0000)
+                    .setTimestamp();
+
+                return interaction.editReply({ embeds: [embed] });
+            }
+
+            // Check if user already has an AI session
+            const userSessions = getUserAISessions(interaction.user.id, guild.id);
+            const openSession = userSessions.find(s => {
+                const channel = guild.channels.cache.get(s.channel_id);
+                return channel && channel.isTextBased();
+            });
+            
+            if (openSession) {
+                const embed = new EmbedBuilder()
+                    .setTitle('❌ Error')
+                    .setDescription(`Anda sudah memiliki AI channel yang aktif: <#${openSession.channel_id}>\n\nGunakan \`/ai-delete\` untuk menghapus session sebelumnya.`)
+                    .setColor(0xFF0000)
+                    .setTimestamp();
+
+                return interaction.editReply({ embeds: [embed] });
+            }
+
+            try {
+                // Get or create AI category
+                let aiCategory = guild.channels.cache.find(
+                    c => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === 'ai chat'
+                );
+
+                if (!aiCategory) {
+                    aiCategory = await guild.channels.create({
+                        name: 'AI Chat',
+                        type: ChannelType.GuildCategory,
+                        permissionOverwrites: [
+                            {
+                                id: guild.id,
+                                deny: ['ViewChannel'],
+                            },
+                        ],
+                    });
+                }
+
+                // Generate session ID (this will be used as channel name)
+                const sessionId = `${Date.now()}-${Math.floor(Math.random() * 10000)}-chatgpt-${Math.floor(Date.now() / 1000)}`;
+                const channelName = sessionId; // Use session ID as channel name
+
+                // Create AI channel
+                const aiChannel = await guild.channels.create({
+                    name: channelName,
+                    type: ChannelType.GuildText,
+                    parent: aiCategory.id,
+                    permissionOverwrites: [
+                        {
+                            id: guild.id,
+                            deny: ['ViewChannel'],
+                        },
+                        {
+                            id: interaction.user.id,
+                            allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'],
+                        },
+                        {
+                            id: client.user!.id,
+                            allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'ManageChannels'],
+                        },
+                    ],
+                });
+
+                // Create session in database
+                createAISession(aiChannel.id, guild.id, interaction.user.id, sessionId);
+
+                // Send welcome message and trigger AI first message
+                const welcomeEmbed = new EmbedBuilder()
+                    .setTitle('🤖 AI Chat Channel')
+                    .setDescription(`Halo <@${interaction.user.id}>!\n\nChannel AI chat Anda telah dibuat. Mulai chat dengan AI sekarang!\n\n**Session ID:** \`${sessionId}\`\n\nGunakan \`/ai-delete\` untuk menghapus channel ini.`)
+                    .setColor(0x5865F2)
+                    .setTimestamp()
+                    .setFooter({
+                        text: getFooterText(`Session ID: ${sessionId}`),
+                        iconURL: interaction.user.displayAvatarURL({ forceStatic: false }) || undefined
+                    });
+
+                await aiChannel.send({ embeds: [welcomeEmbed] });
+
+                // Send first message to AI to create session
+                try {
+                    const response = await fetch(`https://api.ryzumi.vip/api/ai/chatgpt?text=Hello&session=${sessionId}`);
+                    const data = await response.json() as { success: boolean; result: string; session: string };
+                    
+                    if (data.success && data.result) {
+                        await aiChannel.send(`**AI:** ${data.result}`);
+                    }
+                } catch (error) {
+                    console.error('[AI] Error sending first message to AI:', error);
+                    await aiChannel.send('**AI:** Hello! How can I assist you today?');
+                }
+
+                const successEmbed = new EmbedBuilder()
+                    .setTitle('✅ AI Channel Berhasil Dibuat')
+                    .setDescription(`Channel AI Anda telah dibuat: ${aiChannel}`)
+                    .setColor(0x00FF00)
+                    .setTimestamp();
+
+                await interaction.editReply({ embeds: [successEmbed] });
+            } catch (error: any) {
+                console.error('[AI] Error creating AI channel:', error);
+                const errorEmbed = new EmbedBuilder()
+                    .setTitle('❌ Error')
+                    .setDescription(`Gagal membuat AI channel: ${error.message}`)
+                    .setColor(0xFF0000)
+                    .setTimestamp();
+
+                await interaction.editReply({ embeds: [errorEmbed] });
+            }
+            return;
+        }
+
     }
 
     if (!interaction.isChatInputCommand()) return;
@@ -522,16 +788,45 @@ client.on(Events.InteractionCreate, async interaction => {
             });
         }
         
-        await command.execute(interaction, client);
-    } catch (error) {
-        console.error(`Error saat mengeksekusi ${interaction.commandName}`);
-        console.error(error);
+        // Execute command with timeout protection
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Command execution timeout (60s)')), 60000);
+        });
         
-        const errorMessage = { content: 'Terjadi kesalahan saat mengeksekusi command ini!', flags: 64 };
-        if (interaction.replied || interaction.deferred) {
-            await interaction.followUp(errorMessage);
-        } else {
-            await interaction.reply(errorMessage);
+        await Promise.race([
+            command.execute(interaction, client),
+            timeoutPromise
+        ]);
+    } catch (error: any) {
+        console.error(`[ERROR] Error saat mengeksekusi ${interaction.commandName}`);
+        console.error('[ERROR] Error details:', error);
+        console.error('[ERROR] Error stack:', error.stack);
+        
+        const errorMessage = error.message || 'Terjadi kesalahan saat mengeksekusi command ini!';
+        const errorResponse = { 
+            content: `❌ **Error:** ${errorMessage.length > 1900 ? errorMessage.substring(0, 1897) + '...' : errorMessage}`, 
+            flags: 64 
+        };
+        
+        try {
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp(errorResponse);
+            } else {
+                await interaction.reply(errorResponse);
+            }
+        } catch (replyError: any) {
+            console.error('[ERROR] Failed to send error message:', replyError);
+            // Try to send to channel as last resort
+            try {
+                if (interaction.channel && interaction.channel.isTextBased()) {
+                    await interaction.channel.send({ 
+                        content: `❌ **Error saat menjalankan command \`/${interaction.commandName}\`:**\n${errorMessage.substring(0, 1900)}`,
+                        flags: 64
+                    });
+                }
+            } catch (channelError) {
+                console.error('[ERROR] Failed to send error to channel:', channelError);
+            }
         }
     }
 });
@@ -539,6 +834,118 @@ client.on(Events.InteractionCreate, async interaction => {
 // Handle prefix commands (for eval)
 client.on(Events.MessageCreate, async message => {
     if (message.author.bot) return;
+    
+    // Handle AI chat messages
+    if (message.guild && message.channel.isTextBased()) {
+        const { getAISession } = await import('./database/db.js');
+        const session = getAISession(message.channel.id);
+        
+        if (session) {
+            // This is an AI channel, process the message
+            try {
+                // Show typing indicator
+                await message.channel.sendTyping();
+                
+                // Check if user wants to close the session
+                const closeKeywords = ['close', 'delete', 'end session', 'close session', 'delete session', 'tutup', 'hapus'];
+                const messageLower = message.content.toLowerCase().trim();
+                const wantsToClose = closeKeywords.some(keyword => messageLower.includes(keyword));
+                
+                if (wantsToClose) {
+                    // User wants to close the session
+                    const { deleteAISession } = await import('./database/db.js');
+                    
+                    // Delete session from database
+                    deleteAISession(message.channel.id);
+                    
+                    // Send confirmation
+                    await message.reply('✅ Session AI akan ditutup. Channel akan dihapus dalam 3 detik...');
+                    
+                    // Delete channel after 3 seconds
+                    setTimeout(async () => {
+                        try {
+                            if (message.channel.isTextBased() && 'deletable' in message.channel && message.channel.deletable) {
+                                await message.channel.delete();
+                            }
+                        } catch (error) {
+                            console.error('[AI] Error deleting channel:', error);
+                        }
+                    }, 3000);
+                    
+                    return;
+                }
+                
+                // Add context prompt for Discord
+                const discordContext = `[Context: You are chatting in a Discord server. This is a private channel. If the user wants to close this chat, they will say "close", "delete", "end session", or similar. Respond naturally as a helpful Discord AI assistant.]\n\nUser message: ${message.content}`;
+                
+                // Call AI API
+                const response = await fetch(`https://api.ryzumi.vip/api/ai/chatgpt?text=${encodeURIComponent(discordContext)}&session=${session.session_id}`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    },
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => 'Unknown error');
+                    console.error(`[AI] API returned status ${response.status}:`, errorText.substring(0, 200));
+                    
+                    // Handle specific status codes
+                    if (response.status === 403) {
+                        console.warn('[AI] API returned 403 Forbidden - API might be rate limited or blocked');
+                        await message.reply('❌ Maaf, API sedang tidak dapat diakses saat ini. Silakan coba lagi nanti.').catch(() => {});
+                        return;
+                    }
+                    
+                    if (response.status === 429) {
+                        console.warn('[AI] API returned 429 Too Many Requests - Rate limited');
+                        await message.reply('⏳ Terlalu banyak request. Silakan tunggu sebentar dan coba lagi.').catch(() => {});
+                        return;
+                    }
+                    
+                    await message.reply('❌ Maaf, terjadi kesalahan saat memproses pesan Anda.').catch(() => {});
+                    return;
+                }
+                
+                const contentType = response.headers.get('content-type') || '';
+                const text = await response.text();
+                
+                // Check if response is JSON
+                if (!contentType.includes('application/json') && !text.trim().startsWith('{')) {
+                    console.error('[AI] Response is not JSON, content-type:', contentType, 'body:', text.substring(0, 200));
+                    await message.reply('❌ Maaf, terjadi kesalahan saat memproses pesan Anda.').catch(() => {});
+                    return;
+                }
+                
+                let data: { success: boolean; result: string; session: string };
+                
+                try {
+                    data = JSON.parse(text) as { success: boolean; result: string; session: string };
+                } catch (parseError) {
+                    console.error('[AI] Failed to parse JSON response. Status:', response.status);
+                    console.error('[AI] Response text (first 500 chars):', text.substring(0, 500));
+                    await message.reply('❌ Maaf, terjadi kesalahan saat memproses pesan Anda.').catch(() => {});
+                    return;
+                }
+                
+                if (data.success && data.result) {
+                    await message.reply(data.result);
+                } else {
+                    console.warn('[AI] API response indicates failure:', data);
+                    await message.reply('❌ Maaf, terjadi kesalahan saat memproses pesan Anda.').catch(() => {});
+                }
+            } catch (error: any) {
+                console.error('[AI] Error processing AI message:', error);
+                console.error('[AI] Error details:', {
+                    message: error.message,
+                    stack: error.stack,
+                });
+                await message.reply('❌ Maaf, terjadi kesalahan saat memproses pesan Anda.').catch(() => {});
+            }
+            return;
+        }
+    }
     
     const prefix = process.env.PREFIX || '$';
     
