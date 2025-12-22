@@ -39,6 +39,102 @@ interface ActivityConfig {
 let activityRotationInterval: ReturnType<typeof setInterval> | null = null;
 let currentActivityIndex = 0;
 
+// AI API rate limiting (prevent smart filter trigger)
+const aiRequestTimestamps = new Map<string, number>(); // session_id -> last request timestamp
+const aiRequestCounts = new Map<string, number>(); // session_id -> request count (for exponential backoff)
+const MIN_REQUEST_DELAY_MS = 5000; // Minimum 5 seconds between requests (increased from 2s)
+const MAX_RANDOM_DELAY_MS = 3000; // Random delay up to 3 seconds (increased from 1.5s)
+const BASE_DELAY_MS = 3000; // Base delay for first request
+
+// Generate natural browser headers with more variation
+function getNaturalHeaders(): Record<string, string> {
+    const userAgents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    ];
+    const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
+    
+    const acceptLanguages = [
+        'en-US,en;q=0.9',
+        'en-US,en;q=0.9,id;q=0.8',
+        'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+        'en-GB,en;q=0.9',
+    ];
+    const randomLang = acceptLanguages[Math.floor(Math.random() * acceptLanguages.length)];
+    
+    // Randomly include/exclude some headers to add variation
+    const headers: Record<string, string> = {
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': randomLang,
+        'Accept-Encoding': 'gzip, deflate, br',
+        'User-Agent': randomUA,
+        'Referer': 'https://ryzumi.vip/',
+        'Origin': 'https://ryzumi.vip',
+        'Connection': 'keep-alive',
+    };
+    
+    // Randomly add Sec-Fetch headers (not always present in real browsers)
+    if (Math.random() > 0.3) {
+        headers['Sec-Fetch-Dest'] = 'empty';
+        headers['Sec-Fetch-Mode'] = 'cors';
+        headers['Sec-Fetch-Site'] = 'same-site';
+    }
+    
+    // Sometimes add DNT header
+    if (Math.random() > 0.5) {
+        headers['DNT'] = '1';
+    }
+    
+    return headers;
+}
+
+// Rate limiting helper - ensures minimum delay between requests with exponential backoff
+async function waitForRateLimit(sessionId: string): Promise<void> {
+    const lastRequest = aiRequestTimestamps.get(sessionId);
+    const requestCount = (aiRequestCounts.get(sessionId) || 0) + 1;
+    const now = Date.now();
+    
+    // Calculate delay based on request count (exponential backoff for first few requests)
+    let baseDelay = MIN_REQUEST_DELAY_MS;
+    if (requestCount <= 3) {
+        // First 3 requests get longer delay
+        baseDelay = BASE_DELAY_MS + (requestCount * 1000); // 3s, 4s, 5s for first 3 requests
+    }
+    
+    if (lastRequest) {
+        const timeSinceLastRequest = now - lastRequest;
+        const remainingDelay = baseDelay - timeSinceLastRequest;
+        
+        if (remainingDelay > 0) {
+            // Add random delay to make pattern less predictable
+            const randomDelay = Math.random() * MAX_RANDOM_DELAY_MS;
+            const totalDelay = remainingDelay + randomDelay;
+            console.log(`[AI] Rate limiting: waiting ${Math.round(totalDelay)}ms before request (request #${requestCount})`);
+            await new Promise(resolve => setTimeout(resolve, totalDelay));
+        } else {
+            // Still add random delay even if enough time has passed
+            const randomDelay = Math.random() * 2000; // 0-2s random delay
+            await new Promise(resolve => setTimeout(resolve, randomDelay));
+        }
+    } else {
+        // First request for this session, add base delay + random
+        const randomDelay = Math.random() * 2000; // 0-2s random delay
+        const totalDelay = BASE_DELAY_MS + randomDelay;
+        console.log(`[AI] First request for session, waiting ${Math.round(totalDelay)}ms`);
+        await new Promise(resolve => setTimeout(resolve, totalDelay));
+    }
+    
+    // Update timestamp and count
+    aiRequestTimestamps.set(sessionId, Date.now());
+    aiRequestCounts.set(sessionId, requestCount);
+}
+
 function loadActivityConfig(): ActivityConfig {
     const configPath = join(__dirname, 'settings/activity.ts');
     try {
@@ -818,10 +914,9 @@ client.on(Events.InteractionCreate, async interaction => {
             console.error('[ERROR] Failed to send error message:', replyError);
             // Try to send to channel as last resort
             try {
-                if (interaction.channel && interaction.channel.isTextBased()) {
+                if (interaction.channel && interaction.channel.isTextBased() && 'send' in interaction.channel) {
                     await interaction.channel.send({ 
-                        content: `❌ **Error saat menjalankan command \`/${interaction.commandName}\`:**\n${errorMessage.substring(0, 1900)}`,
-                        flags: 64
+                        content: `❌ **Error saat menjalankan command \`/${interaction.commandName}\`:**\n${errorMessage.substring(0, 1900)}`
                     });
                 }
             } catch (channelError) {
@@ -875,26 +970,67 @@ client.on(Events.MessageCreate, async message => {
                     return;
                 }
                 
-                // Add context prompt for Discord
-                const discordContext = `[Context: You are chatting in a Discord server. This is a private channel. If the user wants to close this chat, they will say "close", "delete", "end session", or similar. Respond naturally as a helpful Discord AI assistant.]\n\nUser message: ${message.content}`;
+                // Minimal prompt - short but clear about Discord context and bot name
+                // Include actual timestamp in prompt so AI understands the format, but keep it short
+                const currentTime = Math.floor(Date.now() / 1000);
+                const discordContext = `[You are ${botConfig.name}, a Gen Z AI assistant in Discord. Use slang. You're chatting in a private Discord channel. IMPORTANT: Discord messages have a 2000 character limit. Keep responses under 2000 characters. If you need to say more, be concise or split into shorter messages. For code blocks, use EXACT format: \`\`\`language\\ncode\\n\`\`\` (three backticks, language name, newline, code, newline, three backticks). NO spaces between backticks and language. For time/date questions, use Discord timestamps like <t:${currentTime}:F> or <t:${currentTime}:R>. Calculate current timestamp when needed. Say "close" to end.]\n\nUser: ${message.content}`;
                 
-                // Call AI API
-                const response = await fetch(`https://api.ryzumi.vip/api/ai/chatgpt?text=${encodeURIComponent(discordContext)}&session=${session.session_id}`, {
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/2de3269f-eda5-4801-9525-f939f04eacc7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:905',message:'Before building API URL',data:{discordContextLength:discordContext.length,sessionId:session.session_id,userMessage:message.content.substring(0,50)},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'G'})}).catch(()=>{});
+                // #endregion
+                
+                // Build API URL with proper encoding
+                const encodedText = encodeURIComponent(discordContext);
+                const encodedSession = encodeURIComponent(session.session_id);
+                const apiUrl = `https://api.ryzumi.vip/api/ai/chatgpt?text=${encodedText}&session=${encodedSession}`;
+                
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/2de3269f-eda5-4801-9525-f939f04eacc7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:910',message:'After building API URL',data:{urlLength:apiUrl.length,encodedTextLength:encodedText.length,encodedSessionLength:encodedSession.length,baseUrl:'https://api.ryzumi.vip/api/ai/chatgpt'},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'G'})}).catch(()=>{});
+                // #endregion
+                
+                // Log API call for debugging
+                console.log(`[AI] Processing message, session: ${session.session_id.substring(0, 20)}... URL length: ${apiUrl.length}`);
+                
+                // Rate limiting: wait before making request
+                await waitForRateLimit(session.session_id);
+                
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/2de3269f-eda5-4801-9525-f939f04eacc7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:915',message:'Before fetch API call',data:{method:'GET',urlLength:apiUrl.length,urlStart:apiUrl.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'F'})}).catch(()=>{});
+                // #endregion
+                
+                // API only supports GET method, use it directly
+                const response = await fetch(apiUrl, {
                     method: 'GET',
-                    headers: {
-                        'Accept': 'application/json',
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    },
+                    headers: getNaturalHeaders(),
                 });
+                
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/2de3269f-eda5-4801-9525-f939f04eacc7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:922',message:'After fetch response',data:{status:response.status,statusText:response.statusText,ok:response.ok,url:response.url?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                // #endregion
                 
                 if (!response.ok) {
                     const errorText = await response.text().catch(() => 'Unknown error');
-                    console.error(`[AI] API returned status ${response.status}:`, errorText.substring(0, 200));
+                    
+                    // #region agent log
+                    fetch('http://127.0.0.1:7243/ingest/2de3269f-eda5-4801-9525-f939f04eacc7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:926',message:'Error response details',data:{status:response.status,errorTextStart:errorText.substring(0,200),errorTextLength:errorText.length,responseUrl:response.url?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                    // #endregion
+                    
+                    console.error(`[AI] API returned status ${response.status}`);
+                    console.error(`[AI] Response URL: ${response.url}`);
+                    console.error(`[AI] Error text (first 500 chars):`, errorText.substring(0, 500));
                     
                     // Handle specific status codes
                     if (response.status === 403) {
                         console.warn('[AI] API returned 403 Forbidden - API might be rate limited or blocked');
                         await message.reply('❌ Maaf, API sedang tidak dapat diakses saat ini. Silakan coba lagi nanti.').catch(() => {});
+                        return;
+                    }
+                    
+                    if (response.status === 404) {
+                        console.warn('[AI] API returned 404 Not Found - API endpoint might be incorrect or unavailable');
+                        console.warn(`[AI] Requested URL: ${apiUrl.substring(0, 150)}...`);
+                        console.warn(`[AI] Full URL length: ${apiUrl.length} characters`);
+                        await message.reply('❌ Oops! API lagi down nih bestie 😅 Coba lagi nanti ya!').catch(() => {});
                         return;
                     }
                     
@@ -918,10 +1054,10 @@ client.on(Events.MessageCreate, async message => {
                     return;
                 }
                 
-                let data: { success: boolean; result: string; session: string };
+                let data: { success: boolean; result?: string; response?: string; message?: string; session?: string };
                 
                 try {
-                    data = JSON.parse(text) as { success: boolean; result: string; session: string };
+                    data = JSON.parse(text) as { success: boolean; result?: string; response?: string; message?: string; session?: string };
                 } catch (parseError) {
                     console.error('[AI] Failed to parse JSON response. Status:', response.status);
                     console.error('[AI] Response text (first 500 chars):', text.substring(0, 500));
@@ -929,8 +1065,160 @@ client.on(Events.MessageCreate, async message => {
                     return;
                 }
                 
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/2de3269f-eda5-4801-9525-f939f04eacc7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:976',message:'Parsed API response',data:{success:data.success,hasResult:!!data.result,hasResponse:!!data.response,hasMessage:!!data.message,messageText:data.message?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'E'})}).catch(()=>{});
+                // #endregion
+                
+                // Check for error response structure (response field indicates error)
+                if (data.response && data.message) {
+                    console.warn('[AI] API returned error response:', data);
+                    // #region agent log
+                    fetch('http://127.0.0.1:7243/ingest/2de3269f-eda5-4801-9525-f939f04eacc7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.ts:982',message:'API error response detected',data:{response:data.response,message:data.message,urlLength:apiUrl.length},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'E'})}).catch(()=>{});
+                    // #endregion
+                    
+                    // Handle specific error messages with retry mechanism
+                    if (data.message.includes('smart filter triggered') || data.response.includes('ENCONNRESET') || data.response.includes('Connection reset')) {
+                        console.warn('[AI] Smart filter or connection issue detected - retrying with much longer delay...');
+                        
+                        // Reset request count to force longer delays
+                        aiRequestCounts.set(session.session_id, 0);
+                        
+                        // Retry with much longer delay (10-15 seconds)
+                        const retryDelay = 10000 + Math.random() * 5000; // 10-15 seconds
+                        console.log(`[AI] Waiting ${Math.round(retryDelay)}ms before retry...`);
+                        await new Promise(resolve => setTimeout(resolve, retryDelay));
+                        
+                        // Update timestamp to allow retry
+                        aiRequestTimestamps.set(session.session_id, Date.now() - MIN_REQUEST_DELAY_MS);
+                        
+                        try {
+                            // Retry with GET method (API only supports GET)
+                            const retryResponse = await fetch(apiUrl, {
+                                method: 'GET',
+                                headers: getNaturalHeaders(),
+                            });
+                            
+                            if (retryResponse.ok) {
+                                const retryContentType = retryResponse.headers.get('content-type') || '';
+                                const retryText = await retryResponse.text();
+                                
+                                if (retryContentType.includes('application/json') || retryText.trim().startsWith('{')) {
+                                    const retryData = JSON.parse(retryText) as { success: boolean; result?: string; response?: string; message?: string; session?: string };
+                                    
+                                    if (retryData.success && retryData.result && !retryData.response) {
+                                        console.log('[AI] Retry successful!');
+                                        await message.reply(retryData.result);
+                                        return;
+                                    }
+                                }
+                            }
+                        } catch (retryError) {
+                            console.error('[AI] Retry also failed:', retryError);
+                        }
+                        
+                        // If retry failed, send error message and suggest waiting
+                        if (data.message.includes('smart filter triggered')) {
+                            await message.reply('⚠️ API sedang mendeteksi aktivitas mencurigakan. Silakan tunggu 30 detik sebelum mengirim pesan lagi.').catch(() => {});
+                            // Reset timestamp to force long wait
+                            aiRequestTimestamps.set(session.session_id, Date.now());
+                        } else {
+                            await message.reply('⚠️ Koneksi terputus. Silakan coba lagi dalam beberapa detik.').catch(() => {});
+                        }
+                    } else {
+                        await message.reply('❌ Maaf, terjadi kesalahan saat memproses pesan Anda.').catch(() => {});
+                    }
+                    return;
+                }
+                
                 if (data.success && data.result) {
-                    await message.reply(data.result);
+                    // Check message length (Discord limit is 2000 characters)
+                    const aiResponse = data.result;
+                    const MAX_MESSAGE_LENGTH = 2000;
+                    
+                    if (aiResponse.length > MAX_MESSAGE_LENGTH) {
+                        // Split message into chunks
+                        const chunks: string[] = [];
+                        let currentChunk = '';
+                        
+                        // Try to split by sentences first, then by words, then by characters
+                        const sentences = aiResponse.split(/(?<=[.!?])\s+/);
+                        
+                        for (const sentence of sentences) {
+                            if ((currentChunk + sentence).length <= MAX_MESSAGE_LENGTH - 50) {
+                                // Leave 50 chars for continuation marker
+                                currentChunk += sentence + ' ';
+                            } else {
+                                if (currentChunk.trim()) {
+                                    chunks.push(currentChunk.trim());
+                                }
+                                // If single sentence is too long, split by words
+                                if (sentence.length > MAX_MESSAGE_LENGTH - 50) {
+                                    const words = sentence.split(/\s+/);
+                                    let wordChunk = '';
+                                    for (const word of words) {
+                                        if ((wordChunk + word).length <= MAX_MESSAGE_LENGTH - 50) {
+                                            wordChunk += word + ' ';
+                                        } else {
+                                            if (wordChunk.trim()) {
+                                                chunks.push(wordChunk.trim());
+                                            }
+                                            // If single word is too long, split by characters
+                                            if (word.length > MAX_MESSAGE_LENGTH - 50) {
+                                                for (let i = 0; i < word.length; i += MAX_MESSAGE_LENGTH - 50) {
+                                                    chunks.push(word.substring(i, i + MAX_MESSAGE_LENGTH - 50));
+                                                }
+                                            } else {
+                                                wordChunk = word + ' ';
+                                            }
+                                        }
+                                    }
+                                    if (wordChunk.trim()) {
+                                        currentChunk = wordChunk;
+                                    } else {
+                                        currentChunk = '';
+                                    }
+                                } else {
+                                    currentChunk = sentence + ' ';
+                                }
+                            }
+                        }
+                        
+                        if (currentChunk.trim()) {
+                            chunks.push(currentChunk.trim());
+                        }
+                        
+                        // Send chunks with continuation markers
+                        for (let i = 0; i < chunks.length; i++) {
+                            const chunk = chunks[i];
+                            const isLast = i === chunks.length - 1;
+                            const messageText = isLast ? chunk : `${chunk}\n\n*[Pesan terlalu panjang, dilanjutkan...]*`;
+                            
+                            if (i === 0) {
+                                await message.reply(messageText).catch(() => {});
+                            } else {
+                                await message.channel.send(`**${botConfig.name}:** ${messageText}`).catch(() => {});
+                            }
+                            
+                            // Small delay between chunks to avoid rate limiting
+                            if (!isLast) {
+                                await new Promise(resolve => setTimeout(resolve, 500));
+                            }
+                        }
+                    } else {
+                        // Fix code block formatting if needed (ensure proper format for Discord)
+                        let formattedResponse = aiResponse;
+                        
+                        // Fix common code block formatting issues
+                        // Replace ```language with ```language (ensure no spaces)
+                        formattedResponse = formattedResponse.replace(/```\s*(\w+)\s*\n/g, '```$1\n');
+                        // Ensure closing backticks are on new line
+                        formattedResponse = formattedResponse.replace(/\n\s*```/g, '\n```');
+                        // Fix any triple backticks with spaces
+                        formattedResponse = formattedResponse.replace(/```\s+/g, '```');
+                        formattedResponse = formattedResponse.replace(/\s+```/g, '```');
+                        
+                        await message.reply(formattedResponse);
+                    }
                 } else {
                     console.warn('[AI] API response indicates failure:', data);
                     await message.reply('❌ Maaf, terjadi kesalahan saat memproses pesan Anda.').catch(() => {});
@@ -941,7 +1229,20 @@ client.on(Events.MessageCreate, async message => {
                     message: error.message,
                     stack: error.stack,
                 });
-                await message.reply('❌ Maaf, terjadi kesalahan saat memproses pesan Anda.').catch(() => {});
+                
+                // Check if error is due to message being too long (Discord error code 50035)
+                if (error.code === 50035 || error.message?.includes('2000') || error.message?.includes('BASE_TYPE_MAX_LENGTH')) {
+                    console.warn('[AI] Message too long, attempting to split...');
+                    // Try to get the response and split it
+                    try {
+                        // This shouldn't happen if our splitting logic works, but as a fallback
+                        await message.reply('⚠️ Pesan terlalu panjang! Silakan coba pertanyaan yang lebih pendek.').catch(() => {});
+                    } catch (fallbackError) {
+                        console.error('[AI] Failed to send fallback message:', fallbackError);
+                    }
+                } else {
+                    await message.reply('❌ Maaf, terjadi kesalahan saat memproses pesan Anda.').catch(() => {});
+                }
             }
             return;
         }
@@ -1057,7 +1358,7 @@ async function checkExpiredGiveaways(client: Client): Promise<void> {
                     .setEmoji('🎁')
                     .setDisabled(true);
 
-                const row = new ActionRowBuilder<ButtonBuilder>()
+                const row = new ActionRowBuilder()
                     .addComponents(disabledButton);
 
                 // Create ended embed
@@ -1080,7 +1381,7 @@ async function checkExpiredGiveaways(client: Client): Promise<void> {
                         iconURL: client.user?.displayAvatarURL({ forceStatic: false }) || undefined 
                     });
 
-                await message.edit({ embeds: [endedEmbed], components: [row] });
+                await message.edit({ embeds: [endedEmbed], components: [row] as any });
 
                 // Mention creator and send announcement
                 try {
