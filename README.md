@@ -93,6 +93,13 @@
 - **Help** - Sistem bantuan interaktif dengan pemilihan kategori
 - **Instagram Downloader** - Download video dari Instagram Reels
 
+### 🎌 Sistem Anime
+- **Anime Search** - Mencari informasi anime dari AniList
+  - Menampilkan informasi lengkap (judul, deskripsi, format, status, episode, rating, dll)
+  - Pagination dengan button next/previous untuk melihat semua hasil
+  - Link langsung ke halaman AniList
+  - Genre dan tags dengan format yang rapi
+
 ### 🎫 Sistem Ticket
 - **Setup Ticket** - Konfigurasi channel dan role untuk ticket system
 - **Create Ticket** - Buat ticket baru (via command atau button)
@@ -386,6 +393,18 @@ https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&
 | `/userinfo` | Tampilkan informasi user | `/userinfo [user:@user]` |
 | `/igdl` | Download Instagram Reel | `/igdl link:https://instagram.com/reel/...` |
 
+### 🎌 Anime
+
+| Command | Deskripsi | Penggunaan |
+|---------|-----------|------------|
+| `/anime` | Cari informasi anime dari AniList | `/anime judul:Naruto` |
+
+**Catatan:**
+- Menampilkan informasi lengkap anime (judul, deskripsi, format, status, episode, rating, studio, genre, tags)
+- Gunakan button Previous/Next untuk melihat hasil pencarian lainnya
+- Link langsung ke halaman AniList untuk informasi lebih detail
+- Genre dan tags ditampilkan dengan format yang rapi menggunakan backticks
+
 ### 🔐 Owner
 
 | Command | Deskripsi | Penggunaan |
@@ -441,6 +460,8 @@ dcbot/
 │   │   ├── ai-setup.ts
 │   │   ├── ai-create.ts
 │   │   └── ai-delete.ts
+│   ├── anime/           # Command sistem anime
+│   │   └── anime.ts
 │   └── utility/          # Command utility
 │       ├── botinfo.ts
 │       ├── help.ts

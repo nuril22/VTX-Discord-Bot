@@ -29,6 +29,7 @@ const categoryColors: { [key: string]: number } = {
     'ticket': 0xFFD700,     // Gold
     'fun': 0xFF69B4,        // Hot Pink
     'ai': 0x00D9FF,         // Cyan
+    'anime': 0x02A9FF,      // AniList Blue
     'other': 0x2C2F33       // Dark gray
 };
 
@@ -44,6 +45,7 @@ const categoryEmojis: { [key: string]: string } = {
     'ticket': '🎫',
     'fun': '🎮',
     'ai': '🤖',
+    'anime': '🎌',
     'other': '📋'
 };
 
@@ -59,6 +61,7 @@ const categoryNames: { [key: string]: string } = {
     'ticket': 'Ticket',
     'fun': 'Fun',
     'ai': 'AI',
+    'anime': 'Anime',
     'other': 'Lainnya'
 };
 
@@ -74,6 +77,7 @@ const categoryDescriptions: { [key: string]: string } = {
     'ticket': 'Commands untuk sistem ticket',
     'fun': 'Commands untuk hiburan dan fun',
     'ai': 'Commands untuk AI chat system',
+    'anime': 'Commands untuk mencari informasi anime dari AniList',
     'other': 'Commands lainnya'
 };
 
